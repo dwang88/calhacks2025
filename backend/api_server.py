@@ -8,15 +8,21 @@ import os
 import asyncio
 import subprocess
 import json
+import requests
 from typing import Dict, Any, List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 from dotenv import load_dotenv
+from openai import AsyncOpenAI
 
 # Load environment variables
 load_dotenv()
+
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_REPO = os.getenv("GITHUB_REPO")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 app = FastAPI(title="Website Testing API", version="1.0.0")
 
@@ -52,6 +58,99 @@ async def options_chat():
 async def root():
     """Health check endpoint."""
     return {"message": "Website Testing API is running"}
+
+async def generate_github_issue_content(issues: List[Dict], target_url: str) -> Dict[str, Any]:
+    """Generate GitHub issue title, body, and labels using OpenAI API."""
+    if not OPENAI_API_KEY:
+        return {
+            "title": f"Website Issues Found on {target_url}",
+            "body": f"Found {len(issues)} issues during website testing.",
+            "labels": ["bug", "test-failure"]
+        }
+    
+    try:
+        client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        
+        # Prepare issues data for the prompt
+        issues_summary = []
+        for i, issue in enumerate(issues[:10], 1):  # Limit to first 10 issues
+            issue_text = f"{i}. {issue.get('type', 'UNKNOWN')}: {issue.get('issue', 'No description')}"
+            if issue.get('page'):
+                issue_text += f" (Page: {issue.get('page')})"
+            if issue.get('link'):
+                issue_text += f" (Link: {issue.get('link')})"
+            issues_summary.append(issue_text)
+        
+        issues_text = "\n".join(issues_summary)
+        
+        prompt = f"""
+You are a QA engineer creating a GitHub issue for website testing results. 
+
+Website tested: {target_url}
+Number of issues found: {len(issues)}
+
+Issues found:
+{issues_text}
+
+Please create:
+1. A concise, descriptive title (max 100 characters)
+2. A detailed body with summary, categorized issues, and recommendations
+3. Appropriate GitHub labels (2-4 labels)
+
+Return your response in this exact JSON format:
+{{
+    "title": "Your title here",
+    "body": "Your detailed body here",
+    "labels": ["label1", "label2", "label3"]
+}}
+
+The body should include:
+- Summary of testing
+- Categorized issues (Error Pages, Broken Links, etc.)
+- Severity assessment
+- Recommendations for fixing
+- Technical details for developers
+
+Use markdown formatting in the body.
+"""
+
+        response = await client.responses.create(
+            model="gpt-4.1",
+            instructions="You are a QA engineer creating GitHub issues for website testing results. Be concise, professional, and actionable.",
+            input=prompt,
+            temperature=0.3
+        )
+        
+        # Parse the response
+        content = response.output_text.strip()
+        
+        # Try to extract JSON from the response
+        try:
+            # Look for JSON in the response
+            start_idx = content.find('{')
+            end_idx = content.rfind('}') + 1
+            if start_idx != -1 and end_idx != 0:
+                json_str = content[start_idx:end_idx]
+                result = json.loads(json_str)
+                return result
+            else:
+                raise ValueError("No JSON found in response")
+        except (json.JSONDecodeError, ValueError):
+            # Fallback if JSON parsing fails
+            return {
+                "title": f"Website Issues Found on {target_url}",
+                "body": f"## Website Testing Results\n\n**URL:** {target_url}\n**Issues Found:** {len(issues)}\n\n### Issues:\n{issues_text}\n\n### Recommendations:\n- Review and fix broken links\n- Check error pages\n- Ensure all pages have proper content",
+                "labels": ["bug", "test-failure", "website"]
+            }
+            
+    except Exception as e:
+        print(f"Error generating GitHub issue content: {e}")
+        # Fallback response
+        return {
+            "title": f"Website Issues Found on {target_url}",
+            "body": f"Found {len(issues)} issues during website testing of {target_url}.",
+            "labels": ["bug", "test-failure"]
+        }
 
 async def run_stagehand_crawler(url: str) -> Dict[str, Any]:
     """Run the integrated Stagehand crawler on a URL."""
@@ -570,11 +669,36 @@ async def chat(request: ChatRequest):
                 duration = crawler_result.get("duration", "unknown")
                 
                 if issues:
-                    message = f"🔍 **Website Analysis Complete!**\\n\\n"
-                    message += f"📊 **Summary:**\\n"
-                    message += f"• Pages visited: {pages_visited}\\n"
-                    message += f"• Duration: {duration}s\\n"
-                    message += f"• Issues found: {len(issues)}\\n\\n"
+                    message = f"🔍 **Website Analysis Complete!**\n\n"
+                    message += f"📊 **Summary:**\n"
+                    message += f"• Pages visited: {pages_visited}\n"
+                    message += f"• Duration: {duration}s\n"
+                    message += f"• Issues found: {len(issues)}\n\n"
+
+                    headers = {
+                        "Authorization": f"Bearer {GITHUB_TOKEN}",
+                        "Accept": "application/vnd.github.v3+json",
+                        "X-Github-Api-Version": "2022-11-28"
+                    }
+
+                    # Use OpenAI to generate title, body, and labels
+                    issue_content = await generate_github_issue_content(issues, target_url)
+                    title = issue_content.get("title", f"Website Issues Found on {target_url}")
+                    body = issue_content.get("body", f"Found {len(issues)} issues during website testing.")
+                    labels = issue_content.get("labels", ["bug", "test-failure"])
+                    
+                    data = {
+                        "title": title,
+                        "body": body,
+                        "labels": labels or ["bug", "test-failure"]
+                    }
+                    
+                    url = f"https://api.github.com/repos/{GITHUB_REPO}/issues"
+                    
+                    response = requests.post(url, headers=headers, json=data)
+                    
+                    if response.status_code == 201:
+                        issue_data = response.json()
                     
                     # Categorize issues
                     error_pages = [bug for bug in issues if bug['type'] == 'ERROR_PAGE']
@@ -583,32 +707,32 @@ async def chat(request: ChatRequest):
                     nav_errors = [bug for bug in issues if bug['type'] == 'NAVIGATION_ERROR']
                     
                     if error_pages:
-                        message += f"🚨 **Error Pages ({len(error_pages)}):**\\n"
+                        message += f"🚨 **Error Pages ({len(error_pages)}):**\n"
                         for issue in error_pages[:3]:
-                            message += f"• {issue['issue']}\\n"
+                            message += f"• {issue['issue']}\n"
                     
                     if broken_links:
-                        message += f"\\n🔗 **Broken Links ({len(broken_links)}):**\\n"
+                        message += f"\n🔗 **Broken Links ({len(broken_links)}):**\n"
                         for issue in broken_links[:3]:
-                            message += f"• {issue['issue']}\\n"
+                            message += f"• {issue['issue']}\n"
                     
                     if blank_pages:
-                        message += f"\\n📄 **Blank Pages ({len(blank_pages)}):**\\n"
+                        message += f"\n📄 **Blank Pages ({len(blank_pages)}):**\n"
                         for issue in blank_pages[:3]:
-                            message += f"• {issue['issue']}\\n"
+                            message += f"• {issue['issue']}\n"
                     
                     if nav_errors:
-                        message += f"\\n🧭 **Navigation Errors ({len(nav_errors)}):**\\n"
+                        message += f"\n🧭 **Navigation Errors ({len(nav_errors)}):**\n"
                         for issue in nav_errors[:3]:
-                            message += f"• {issue['issue']}\\n"
+                            message += f"• {issue['issue']}\n"
                     
-                    message += f"\\n📋 Full details available in the technical data below."
-                    
+                    message += f"\n📋 Full details available in the technical data below."
+                
                 else:
-                    message = f"✅ **Great news!** No issues found on {target_url}\\n\\n"
-                    message += f"📊 **Summary:**\\n"
-                    message += f"• Pages visited: {pages_visited}\\n"
-                    message += f"• Duration: {duration}s\\n"
+                    message = f"✅ **Great news!** No issues found on {target_url}\n\n"
+                    message += f"📊 **Summary:**\n"
+                    message += f"• Pages visited: {pages_visited}\n"
+                    message += f"• Duration: {duration}s\n"
                     message += f"• All tested links and pages are working correctly!"
                 
                 return ChatResponse(
