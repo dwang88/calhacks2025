@@ -1,87 +1,79 @@
-from playwright.sync_api import Page, expect, sync_playwright
+
+import pytest
+from playwright.sync_api import Page, expect
 
 def test_localhost_3001(page: Page):
-    # 1. Test page loading and basic elements
+    # Test page loading and basic elements
     page.goto("http://localhost:3001/")
-    expect(page).to_have_title("React App")
+    expect(page).to_have_title("Vite + React")
     
-    # Wait for the root element to be present
-    root = page.wait_for_selector("#root")
-    expect(root).to_be_visible()
-
-    # 2. Test navigation and links
-    # Assuming there are navigation links, adjust selectors as needed
-    nav_links = page.query_selector_all("nav a")
-    for link in nav_links:
-        href = link.get_attribute("href")
-        if href and not href.startswith("http"):
-            link.click()
-            page.wait_for_load_state("networkidle")
-            expect(page).to_have_url(f"http://localhost:3001{href}")
-            page.go_back()
-
-    # 3. Test forms and user interactions
-    # Assuming there's a form, adjust selectors as needed
-    form = page.query_selector("form")
-    if form:
-        input_field = page.query_selector('input[type="text"]')
-        if input_field:
-            input_field.fill("Test input")
-            expect(input_field).to_have_value("Test input")
-
-        submit_button = page.query_selector('button[type="submit"]')
-        if submit_button:
-            submit_button.click()
-            page.wait_for_load_state("networkidle")
-
-    # 4. Test responsive design elements
-    page.set_viewport_size({"width": 1920, "height": 1080})
-    expect(page.query_selector("body")).to_be_visible()
-
+    # Test navigation and links
+    navbar = page.locator("nav")
+    expect(navbar).to_be_visible()
+    
+    links = navbar.locator("a")
+    expect(links).to_have_count(3)
+    
+    # Test forms and user interactions
+    input_field = page.locator('input[type="text"]')
+    expect(input_field).to_be_visible()
+    
+    input_field.fill("Test input")
+    expect(input_field).to_have_value("Test input")
+    
+    submit_button = page.locator('button:has-text("Submit")')
+    submit_button.click()
+    
+    # Test responsive design elements
+    page.set_viewport_size({"width": 1200, "height": 800})
+    expect(page.locator("main")).to_be_visible()
+    
     page.set_viewport_size({"width": 375, "height": 667})
-    expect(page.query_selector("body")).to_be_visible()
-
-    # 5. Include proper assertions and error handling
-    try:
-        main_content = page.query_selector("main")
-        expect(main_content).not_to_be_none()
-    except AssertionError:
-        print("Main content not found")
-
-    # 6. Use robust selectors that are less likely to break
-    header = page.query_selector('[data-testid="header"]') or page.query_selector("header")
-    if header:
-        expect(header).to_be_visible()
-
-    # 7. Include waits for elements to load
-    footer = page.wait_for_selector("footer", state="visible", timeout=5000)
-    expect(footer).to_be_visible()
-
-    # 8. Handle cases where elements might not be present
-    dynamic_content = page.query_selector(".dynamic-content")
-    if dynamic_content:
-        expect(dynamic_content).to_be_visible()
-    else:
-        print("Dynamic content not found")
-
-    # 9. Additional tests
-    # Test for console errors
-    console_messages = []
-    page.on("console", lambda msg: console_messages.append(msg))
-    assert len([msg for msg in console_messages if msg.type == "error"]) == 0, "Console errors found"
-
-    # Test for broken images
-    images = page.query_selector_all("img")
-    for img in images:
-        expect(img).to_have_js_property("naturalWidth", lambda width: width > 0)
-
-    # Test for accessibility
-    accessibility = page.accessibility.snapshot()
-    assert accessibility["children"], "No accessibility tree found"
+    expect(page.locator("main")).to_be_visible()
+    
+    # Test dynamic content loading
+    load_more_button = page.locator('button:has-text("Load More")')
+    
+    if load_more_button.is_visible():
+        initial_item_count = page.locator('.item').count()
+        load_more_button.click()
+        page.wait_for_selector('.item >> nth=' + str(initial_item_count))
+        expect(page.locator('.item')).to_have_count(greater_than=initial_item_count)
+    
+    # Test error handling
+    page.goto("http://localhost:3001/non-existent-page")
+    expect(page.locator("text=404")).to_be_visible()
+    
+    # Test search functionality
+    page.goto("http://localhost:3001/")
+    search_input = page.locator('input[placeholder="Search..."]')
+    
+    if search_input.is_visible():
+        search_input.fill("test search")
+        search_input.press("Enter")
+        page.wait_for_selector('.search-results')
+        expect(page.locator('.search-results')).to_be_visible()
+    
+    # Test modal or popup if present
+    modal_trigger = page.locator('button:has-text("Open Modal")')
+    
+    if modal_trigger.is_visible():
+        modal_trigger.click()
+        modal = page.locator('.modal')
+        expect(modal).to_be_visible()
+        
+        close_button = modal.locator('button:has-text("Close")')
+        close_button.click()
+        expect(modal).to_be_hidden()
+    
+    # Test dark mode toggle if present
+    dark_mode_toggle = page.locator('#dark-mode-toggle')
+    
+    if dark_mode_toggle.is_visible():
+        initial_theme = page.evaluate('document.body.classList.contains("dark-theme")')
+        dark_mode_toggle.click()
+        new_theme = page.evaluate('document.body.classList.contains("dark-theme")')
+        expect(new_theme).not_to_equal(initial_theme)
 
 if __name__ == "__main__":
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        page = browser.new_page()
-        test_localhost_3001(page)
-        browser.close()
+    pytest.main([__file__])

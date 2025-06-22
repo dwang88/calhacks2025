@@ -103,6 +103,7 @@ Generate a COMPLETE Playwright test file (Python) that tests this website thorou
 7. Include waits for elements to load
 8. Handle cases where elements might not be present
 9. Do NOT use the await keyword for functions that are not async
+10. Make sure to properly call the test function at the end of the file
 
 Return ONLY the complete Python Playwright test code, no explanations. The code should be ready to run.
 
@@ -207,8 +208,8 @@ async def fix_file_with_openai(filename: str, error_message: str, file_content: 
             fix_instruction = "Fix the error to make the test runnable"
         
         # Create the OpenAI API request
-        import openai
-        openai.api_key = os.getenv("OPENAI_API_KEY")
+        from openai import OpenAI
+        client = OpenAI()
         
         prompt = f"""You are a Python debugging expert specializing in Playwright testing. Fix the specific error in the code.
 
@@ -222,23 +223,13 @@ Code to fix:
 
 Return ONLY the corrected Python code, no explanations or markdown formatting. The code should be ready to run immediately."""
 
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a Python debugging expert. Fix the specific error in the code and return only the corrected code, no explanations."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            temperature=0.1,
-            max_tokens=2000
+        response = client.responses.create(
+            model="gpt-4.1",
+            instructions="You are a Python debugging expert. Fix the specific error in the code and return only the corrected code, no explanations.",
+            input=prompt
         )
         
-        fixed_code = response.choices[0].message.content
+        fixed_code = response.output_text
         
         # Clean up if it contains markdown
         if "```python" in fixed_code:
