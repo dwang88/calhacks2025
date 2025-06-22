@@ -1,0 +1,234 @@
+.api-key-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 20px;
+}
+
+.api-key-form {
+  background: white;
+  padding: 40px;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  max-width: 500px;
+  width: 100%;
+  text-align: center;
+}
+
+.api-key-form h1 {
+  color: #333;
+  margin-bottom: 20px;
+  font-size: 2rem;
+}
+
+.api-key-form p {
+  color: #666;
+  margin-bottom: 30px;
+  font-size: 1.1rem;
+}
+
+.api-key-form form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.api-key-form input {
+  padding: 15px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 16px;
+  outline: none;
+  transition: border-color 0.3s;
+}
+
+.api-key-form input:focus {
+  border-color: #667eea;
+}
+
+.api-key-form button {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 15px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.api-key-form button:hover {
+  transform: translateY(-2px);
+}
+
+.api-key-help {
+  text-align: left;
+  background: #f8f9fa;
+  padding: 20px;
+  border-radius: 8px;
+  border-left: 4px solid #667eea;
+}
+
+.api-key-help p {
+  margin-bottom: 15px;
+  color: #333;
+}
+
+.api-key-help ol {
+  color: #666;
+  line-height: 1.6;
+}
+
+.api-key-help a {
+  color: #667eea;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.api-key-help a:hover {
+  text-decoration: underline;
+}
+
+.welcome-message {
+  background: #f8f9fa;
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid #e0e0e0;
+  margin-bottom: 20px;
+}
+
+.welcome-message p {
+  margin-bottom: 15px;
+  color: #333;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.welcome-message ul {
+  list-style: none;
+  padding: 0;
+}
+
+.welcome-message li {
+  background: white;
+  padding: 8px 12px;
+  margin: 5px 0;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+  font-size: 13px;
+  color: #666;
+  font-style: italic;
+}
+
+.welcome-message li:before {
+  content: "💬 ";
+}
+
+.map-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+  z-index: 1000;
+}
+
+.map-loading .spinner {
+  width: 30px;
+  height: 30px;
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.map-loading span {
+  color: #666;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.map-error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: white;
+  padding: 30px;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  text-align: center;
+  max-width: 400px;
+  z-index: 1000;
+}
+
+.map-error h3 {
+  color: #e74c3c;
+  margin-bottom: 15px;
+  font-size: 1.2rem;
+}
+
+.map-error p {
+  color: #666;
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+.retry-button {
+  background: #e74c3c;
+  color: white;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.retry-button:hover {
+  background: #c0392b;
+}
+
+.chat-header {
+  padding: 20px;
+  border-bottom: 1px solid #e0e0e0;
+  background: #f8f9fa;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.api-key-info {
+  background: #28a745;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.clear-key-button {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 5px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.clear-key-button:hover {
+  background: #e0e0e0;
+} 
