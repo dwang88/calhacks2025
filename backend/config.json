@@ -1,0 +1,25 @@
+{
+  "urls": [
+    "https://www.google.com",
+    "https://www.github.com",
+    "https://www.stackoverflow.com"
+  ],
+  "schedule_interval": 3600,
+  "headless": true,
+  "retry_failed": true,
+  "max_retries": 3,
+  "email_notifications": false,
+  "email_recipients": ["your-email@example.com"],
+  "screenshot_on_failure": true,
+  "parallel_execution": true,
+  "max_parallel_tests": 3,
+  "test_timeout": 300,
+  "browser_type": "chromium",
+  "viewport_width": 1920,
+  "viewport_height": 1080,
+  "wait_for_network_idle": true,
+  "take_screenshots_on_success": false,
+  "save_test_files": true,
+  "cleanup_old_reports": true,
+  "max_report_age_days": 7
+} 
