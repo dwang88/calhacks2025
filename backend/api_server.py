@@ -16,6 +16,7 @@ from pydantic import BaseModel
 import uvicorn
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
+from anthropic import AsyncAnthropic
 
 # Load environment variables
 load_dotenv()
@@ -23,6 +24,7 @@ load_dotenv()
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 app = FastAPI(title="Website Testing API", version="1.0.0")
 
@@ -58,6 +60,41 @@ async def options_chat():
 async def root():
     """Health check endpoint."""
     return {"message": "Website Testing API is running"}
+
+async def summarize_message_with_claude(message: str) -> str:
+    """Summarize a message using Anthropic Claude API."""
+    if not ANTHROPIC_API_KEY:
+        return message[:200] + "..." if len(message) > 200 else message
+    
+    try:
+        client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+        
+        prompt = f"""
+Please provide a concise summary of the following message. The summary should be:
+- About 3-4 sentences - concise but descriptive and informative
+- Capture the main intent and key details
+- Maintain the original tone and context
+
+Message to summarize:
+{message}
+
+Summary:
+"""
+        
+        response = await client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=150,
+            system="You are a helpful assistant that creates concise, accurate summaries. Be brief but informative.",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        summary = response.content[0].text.strip()
+        return summary if summary else message[:200] + "..." if len(message) > 200 else message
+        
+    except Exception as e:
+        print(f"Error summarizing message with Claude: {e}")
+        # Fallback to simple truncation
+        return message[:200] + "..." if len(message) > 200 else message
 
 async def generate_github_issue_content(issues: List[Dict], target_url: str) -> Dict[str, Any]:
     """Generate GitHub issue title, body, and labels using OpenAI API."""
@@ -635,6 +672,20 @@ async def scrape_website(request: dict):
     result = await run_stagehand_crawler(url)
     return result
 
+# @app.post("/summarize")
+# async def summarize_message(request: dict):
+#     """Summarize a message using Claude API."""
+#     message = request.get("message")
+#     if not message:
+#         raise HTTPException(status_code=400, detail="Message is required")
+    
+#     summary = await summarize_message_with_claude(message)
+#     return {
+#         "original_message": message,
+#         "summary": summary,
+#         "success": True
+#     }
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """Handle chat messages and perform website testing."""
@@ -726,7 +777,7 @@ async def chat(request: ChatRequest):
                         for issue in nav_errors[:3]:
                             message += f"• {issue['issue']}\n"
                     
-                    message += f"\n📋 Full details available in the technical data below."
+                    message += f"\n📋 Full details available in the technical data below."                    
                 
                 else:
                     message = f"✅ **Great news!** No issues found on {target_url}\n\n"
@@ -734,6 +785,8 @@ async def chat(request: ChatRequest):
                     message += f"• Pages visited: {pages_visited}\n"
                     message += f"• Duration: {duration}s\n"
                     message += f"• All tested links and pages are working correctly!"
+                  
+                message = await summarize_message_with_claude(message)
                 
                 return ChatResponse(
                     success=True,
