@@ -63,5 +63,6 @@ if __name__ == "__main__":
             print("✅ All tests passed!")
         except Exception as e:
             print(f"❌ Test failed: {str(e)}")
+            # make the AI agent put up a github issue
         finally:
             browser.close()
