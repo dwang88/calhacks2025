@@ -46,14 +46,14 @@ async def scrape_website(url: str) -> str:
         await browser.close()
         
         full_content = f"""
-HTML CONTENT:
-{html_content}
+        HTML CONTENT:
+        {html_content}
 
-INLINE JAVASCRIPT:
-{chr(10).join(scripts) if scripts else 'No inline JavaScript found'}
+        INLINE JAVASCRIPT:
+        {chr(10).join(scripts) if scripts else 'No inline JavaScript found'}
 
-INLINE CSS:
-{chr(10).join(styles) if styles else 'No inline CSS found'}
+        INLINE CSS:
+        {chr(10).join(styles) if styles else 'No inline CSS found'}
 """
         
         print("✅ Scraping complete!")
@@ -80,7 +80,19 @@ Generate a COMPLETE Playwright test file (Python) that tests this website thorou
 4. Test responsive design elements
 5. Include proper assertions and error handling
 
-Return ONLY the complete Python Playwright test code, no explanations. The code should be ready to run.
+Return ONLY the complete Python Playwright test code, no explanations. The name of the test file should be the same as the playwright test function name. Make sure to call the test function so that the code is ready to run.
+For example, if the test function is called test_google_com, this is what the end of the test file should look like, so that the test file can be run:
+if __name__ == "__main__":
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        try:
+            test_google_com(page)
+            print("✅ All tests passed!")
+        except Exception as e:
+            print(f"❌ Test failed")
+        finally:
+            browser.close()
 
 The test file should be named `test_{url.replace("https://", "").replace("http://", "").replace("/", "_").replace(".", "_")}.py`
 """
@@ -103,6 +115,7 @@ The test file should be named `test_{url.replace("https://", "").replace("http:/
 
 async def save_test_file(test_code: str, url: str):
     """Save the generated test to a file."""
+    print(f"💾 Saving test to file: {test_code}")
     # Create a safe filename
     filename = f"test_{url.replace('https://', '').replace('http://', '').replace('/', '_').replace('.', '_').replace(':', '_')}.py"
     
@@ -111,6 +124,36 @@ async def save_test_file(test_code: str, url: str):
     
     print(f"💾 Test saved to: {filename}")
     return filename
+
+async def generate_playwright_config(func_name: str):
+    """Generate a Playwright config file to test the given function, which has playwright tests"""
+    prompt = f"""
+    You are a QA engineer. I have a function that has playwright tests: {func_name}
+
+    Generate the code in a Playwright config file to test this function.
+
+    Return ONLY the complete Python Playwright config code, no explanations. The code should be ready to run.
+    """
+    print(f"🤖 Generating Playwright config with Claude...")
+    client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+
+    try:
+        response = await client.messages.create(
+            model="claude-3-5-sonnet-20240620",
+            max_tokens=4000,
+            system="You are a QA engineer that generates complete, runnable Playwright config files. Return only the Python code, no explanations.",
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        config_code = response.content[0].text
+        print("✅ Config generation complete!")
+        with open("playwright.config.py", "w") as f:
+            f.write(config_code)
+        return config_code
+        
+    except Exception as e:
+        print(f"❌ Error generating config: {e}")
+        return None
 
 async def main():
     if not TARGET_URL or not ANTHROPIC_API_KEY:
@@ -127,6 +170,8 @@ async def main():
     
     # 2. Generate Playwright test
     test_code = await generate_playwright_test(html_content, TARGET_URL)
+    test_code = test_code.split("```python")[1]
+    test_code = test_code.split("```")[0]
     
     if not test_code:
         print("❌ Failed to generate test code.")
