@@ -100,27 +100,54 @@ async def chat(request: ChatRequest):
         response = await agent.ainvoke({"messages": messages})
 
         print("Response: ", response)
+        print("Response type: ", type(response))
+        if isinstance(response, dict) and "messages" in response:
+            print("Number of messages: ", len(response["messages"]))
+            for i, msg in enumerate(response["messages"]):
+                print(f"Message {i}: type={type(msg)}, has_content={hasattr(msg, 'content')}, has_name={hasattr(msg, 'name')}")
+                if hasattr(msg, 'content'):
+                    print(f"  Content type: {type(msg.content)}")
+                    if isinstance(msg.content, list):
+                        print(f"  Content blocks: {len(msg.content)}")
+                        for j, block in enumerate(msg.content):
+                            print(f"    Block {j}: {block}")
         
         # Extract the response - LangGraph returns a dict with 'messages' key
         if response and isinstance(response, dict) and "messages" in response:
-            # Get the last AIMessage (assistant message)
-            ai_messages = [msg for msg in response["messages"] if hasattr(msg, 'content') and not hasattr(msg, 'name')]
-            if ai_messages:
-                last_ai_message = ai_messages[-1]
-                # Extract the text content from the AIMessage
-                if hasattr(last_ai_message, 'content'):
-                    if isinstance(last_ai_message.content, str):
-                        message_content = last_ai_message.content
-                    elif isinstance(last_ai_message.content, list):
+            # Get all messages and find the last AI message
+            messages = response["messages"]
+            
+            # Look for the last AIMessage (assistant message)
+            for msg in reversed(messages):
+                # Check if it's an AI message (has content but no name attribute)
+                if hasattr(msg, 'content') and not hasattr(msg, 'name'):
+                    # Extract the text content from the AIMessage
+                    if isinstance(msg.content, str):
+                        message_content = msg.content
+                    elif isinstance(msg.content, list):
                         # Handle list of content blocks (text and tool_use)
-                        text_blocks = [block for block in last_ai_message.content if block.get('type') == 'text']
+                        text_blocks = [block for block in msg.content if block.get('type') == 'text']
                         if text_blocks:
                             message_content = text_blocks[-1].get('text', '')
                         else:
                             message_content = "Processing completed."
                     else:
-                        message_content = str(last_ai_message.content)
+                        message_content = str(msg.content)
                     
+                    return ChatResponse(
+                        success=True,
+                        message=message_content,
+                        data={
+                            "action": "mcp_tool_execution",
+                            "status": "completed",
+                            "url": request.url
+                        }
+                    )
+            
+            # If no AI message found, check if there are any messages with content
+            for msg in reversed(messages):
+                if hasattr(msg, 'content'):
+                    message_content = str(msg.content)
                     return ChatResponse(
                         success=True,
                         message=message_content,
