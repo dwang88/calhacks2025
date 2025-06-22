@@ -155,6 +155,108 @@ if __name__ == "__main__":
         print("Error generating test: ", str(e))
         return f"❌ Error generating test: {str(e)}"
 
+async def edit_file_based_on_error(filename: str, error: str) -> str:
+    """Edit a file based on an error using AI.
+    
+    Args:
+        filename: The file to edit (e.g., test_google_com.py)
+        error: The error to edit the file based on (e.g., "NameError: name 'sync_playwright' is not defined")
+    """
+    try:
+        print(f"🔍 Editing file: {filename} based on error: {error}")
+        
+        # Check if file exists
+        if not os.path.exists(filename):
+            return f"❌ File {filename} does not exist"
+        
+        # Read the file
+        with open(filename, 'r') as f:
+            file_content = f.read()
+        
+        # Use OpenAI to fix the file intelligently
+        fixed_content = await fix_file_with_openai(filename, error, file_content)
+        
+        # Write the fixed content back to the file
+        with open(filename, 'w') as f:
+            f.write(fixed_content)
+        
+        return f"✅ Fixed {filename} based on error: {error}"
+        
+    except Exception as e:
+        print("Error editing file: ", str(e))
+        return f"❌ Error editing file: {str(e)}"
+
+async def fix_file_with_openai(filename: str, error_message: str, file_content: str) -> str:
+    """Fix a file using OpenAI based on a specific error."""
+    
+    try:
+        # Create a targeted prompt based on the error type
+        if "sync_playwright" in error_message or "NameError" in error_message:
+            fix_instruction = "Add missing imports, especially 'from playwright.sync_api import sync_playwright' at the top of the file"
+        elif "page" in error_message and "not defined" in error_message:
+            fix_instruction = "Fix the page parameter usage in the test function - ensure page is properly passed as parameter"
+        elif "timeout" in error_message.lower():
+            fix_instruction = "Add proper wait conditions and increase timeouts for element interactions"
+        elif "element" in error_message.lower() and "not found" in error_message.lower():
+            fix_instruction = "Fix element selectors to be more robust and add proper wait conditions"
+        elif "import" in error_message.lower():
+            fix_instruction = "Add missing import statements at the top of the file"
+        elif "syntax" in error_message.lower():
+            fix_instruction = "Fix syntax errors in the Python code"
+        else:
+            fix_instruction = "Fix the error to make the test runnable"
+        
+        # Create the OpenAI API request
+        import openai
+        openai.api_key = os.getenv("OPENAI_API_KEY")
+        
+        prompt = f"""You are a Python debugging expert specializing in Playwright testing. Fix the specific error in the code.
+
+Error: {error_message}
+Fix instruction: {fix_instruction}
+
+Code to fix:
+```python
+{file_content}
+```
+
+Return ONLY the corrected Python code, no explanations or markdown formatting. The code should be ready to run immediately."""
+
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a Python debugging expert. Fix the specific error in the code and return only the corrected code, no explanations."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.1,
+            max_tokens=2000
+        )
+        
+        fixed_code = response.choices[0].message.content
+        
+        # Clean up if it contains markdown
+        if "```python" in fixed_code:
+            fixed_code = fixed_code.split("```python")[1].split("```")[0]
+        elif "```" in fixed_code:
+            fixed_code = fixed_code.split("```")[1].split("```")[0]
+        
+        return fixed_code.strip()
+        
+    except Exception as e:
+        print(f"Error in OpenAI fix: {str(e)}")
+        # Fallback: return original content with basic fix attempt
+        if "sync_playwright" in error_message:
+            return f"""from playwright.sync_api import sync_playwright
+
+{file_content}"""
+        return file_content
+
 @mcp.tool()
 async def run_playwright_test(filename: str) -> str:
     """Run a Playwright test file and return the results.
@@ -162,34 +264,41 @@ async def run_playwright_test(filename: str) -> str:
     Args:
         filename: The test file to run (e.g., test_google_com.py)
     """
-    try:
-        print(f"🚀 Running test: {filename}")
-        
-        # Check if file exists
-        if not os.path.exists(filename):
-            return f"❌ Test file {filename} does not exist"
-        
-        # Run the test
-        result = subprocess.run(
-            [sys.executable, filename],
-            capture_output=True,
-            text=True,
-            timeout=60  # 60 second timeout
-        )
-        
-        success = result.returncode == 0
-        
-        if success:
-            print("Test completed successfully!")
-            return f"✅ Test {filename} completed successfully!\n\nOutput:\n{result.stdout}"
-        else:
-            print("Test failed!")
-            return f"❌ Test {filename} failed!\n\nError:\n{result.stderr}\n\nOutput:\n{result.stdout}"
-        
-    except subprocess.TimeoutExpired:
-        return f"❌ Test {filename} timed out after 60 seconds"
-    except Exception as e:
-        return f"❌ Error running test: {str(e)}"
+    for i in range(3):
+        try:
+            print(f"🚀 Running test: {filename} (Attempt {i+1}/3)")
+            
+            # Check if file exists
+            if not os.path.exists(filename):
+                return f"❌ Test file {filename} does not exist"
+            
+            # Run the test
+            result = subprocess.run(
+                [sys.executable, filename],
+                capture_output=True,
+                text=True,
+                timeout=60  # 60 second timeout
+            )
+            
+            success = result.returncode == 0
+            
+            if success:
+                print("Test completed successfully!")
+                return f"✅ Test {filename} completed successfully!\n\nOutput:\n{result.stdout}"
+            else:
+                print(f"❌ Test {filename} failed! (Attempt {i+1}/3)")
+                if i == 2:  # if we've tried 3 times, return the error
+                    return f"❌ Test {filename} failed after 3 attempts!\n\nError:\n{result.stderr}\n\nOutput:\n{result.stdout}"
+                
+                # Try to fix the file before retrying
+                print(f"🔧 Attempting to fix {filename} based on error...")
+                fix_result = await edit_file_based_on_error(filename, result.stderr)
+                print(f"Fix result: {fix_result}")
+                
+        except subprocess.TimeoutExpired:
+            return f"❌ Test {filename} timed out after 60 seconds"
+        except Exception as e:
+            return f"❌ Error running test: {str(e)}"
 
 @mcp.tool()
 async def create_github_issue(title: str, body: str, labels: List[str] = None) -> str:
@@ -228,63 +337,6 @@ async def create_github_issue(title: str, body: str, labels: List[str] = None) -
             
     except Exception as e:
         return f"❌ Error creating GitHub issue: {str(e)}"
-
-# @mcp.tool()
-# async def test_website_integrity(url: str) -> str:
-#     """Complete workflow: scrape, generate tests, run tests, create issue if needed.
-    
-#     Args:
-#         url: The URL to test (e.g., https://example.com)
-#     """
-#     try:
-#         print(f"🔍 Testing website integrity for: {url}")
-        
-#         # Step 1: Scrape the website
-#         scrape_result = await scrape_website(url)
-#         if "❌" in scrape_result:
-#             return scrape_result
-        
-#         # Step 2: Generate Playwright test
-#         # We need to get the HTML content first
-#         async with async_playwright() as p:
-#             browser = await p.chromium.launch()
-#             page = await browser.new_page()
-#             await page.goto(url, wait_until="networkidle")
-#             html_content = await page.content()
-#             await browser.close()
-        
-#         test_result = await generate_playwright_test(url, html_content)
-#         if "❌" in test_result:
-#             return test_result
-        
-#         # Extract filename from the result
-#         filename = test_result.split("saved to: ")[1]
-        
-#         # Step 3: Run the test
-#         run_result = await run_playwright_test(filename)
-        
-#         # Step 4: Create GitHub issue if test failed
-#         if "❌" in run_result:
-#             issue_title = f"Test Failure: {url}"
-#             issue_body = f"""
-# ## Test Failure Report
-
-# **URL Tested:** {url}
-# **Test File:** {filename}
-
-# ### Error Details:
-# {run_result}
-
-# This issue was automatically generated by the website testing system.
-# """
-            
-#             issue_result = await create_github_issue(issue_title, issue_body)
-#             return f"❌ Test failed and GitHub issue created: {issue_result}"
-        
-#         return f"✅ Website integrity test completed successfully! {run_result}"
-        
-#     except Exception as e:
-#         return f"❌ Website integrity test failed: {str(e)}"
 
 if __name__ == "__main__":
     # Run the FastMCP server
