@@ -146,7 +146,7 @@ if __name__ == "__main__":
 """
         
         # Save the test file
-        with open(filename, 'w') as f:
+        with open(filename, 'w', encoding='utf-8') as f:
             f.write(test_code)
         
         print("Test generated and saved to: ", filename)
@@ -171,14 +171,14 @@ async def edit_file_based_on_error(filename: str, error: str) -> str:
             return f"❌ File {filename} does not exist"
         
         # Read the file
-        with open(filename, 'r') as f:
+        with open(filename, 'r', encoding='utf-8') as f:
             file_content = f.read()
         
         # Use OpenAI to fix the file intelligently
         fixed_content = await fix_file_with_openai(filename, error, file_content)
         
         # Write the fixed content back to the file
-        with open(filename, 'w') as f:
+        with open(filename, 'w', encoding='utf-8') as f:
             f.write(fixed_content)
         
         return f"✅ Fixed {filename} based on error: {error}"
@@ -268,6 +268,8 @@ async def run_playwright_test(filename: str) -> str:
                 [sys.executable, filename],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',  # Replace problematic characters instead of failing
                 timeout=60  # 60 second timeout
             )
             

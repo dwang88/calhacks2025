@@ -68,12 +68,7 @@ export function StatusIndicator({
 export function SystemStatus() {
   return (
     <div className="flex items-center gap-4 text-sm">
-      <StatusIndicator status="online" message="API Connected" />
-      <StatusIndicator status="online" message="AI Ready" />
-      <div className="flex items-center gap-2">
-        <Wifi className="w-4 h-4 text-green-600" />
-        <span className="text-gray-600">System Operational</span>
-      </div>
+      <StatusIndicator status="online" message="System Operational" />
     </div>
   );
 }

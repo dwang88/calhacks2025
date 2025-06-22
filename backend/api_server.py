@@ -199,8 +199,8 @@ import {{ z }} from "zod";
 
 const targetUrl = "{url}";
 
-console.log("🕷️ INTEGRATED STAGEHAND CRAWLER");
-console.log("🔍 With Detailed Progress Logging");
+console.log("INTEGRATED STAGEHAND CRAWLER");
+console.log("With Detailed Progress Logging");
 console.log("================================");
 
 // Initialize Stagehand
@@ -223,8 +223,8 @@ try {{
     let pageCount = 0;
     const maxPages = 10; // Increased limit
 
-    console.log(`🚀 Starting crawl from: ${{targetUrl}}`);
-    console.log(`📊 Max pages limit: ${{maxPages}}`);
+    console.log(`Starting crawl from: ${{targetUrl}}`);
+    console.log(`Max pages limit: ${{maxPages}}`);
 
     // Helper function to normalize URLs consistently
     function normalizeUrl(url) {{
@@ -247,7 +247,7 @@ try {{
         visitedUrls.add(normalizedCurrentUrl);
         pageCount++;
         
-        console.log(`\\n[${{pageCount}}] 🔍 Testing: ${{normalizedCurrentUrl.replace(targetUrl, '') || '/'}}`);
+        console.log(`\\n[${{pageCount}}] Testing: ${{normalizedCurrentUrl.replace(targetUrl, '') || '/'}}`);
         
         try {{
             const response = await page.goto(normalizedCurrentUrl, {{ waitUntil: 'domcontentloaded' }});
@@ -284,9 +284,9 @@ try {{
             const statusCode = response.status();
             const isHttpError = statusCode >= 400;
             
-            console.log(`   📄 "${{pageData.title}}" (Status: ${{statusCode}})`);
-            console.log(`   🔗 Found ${{pageData.links.length}} internal links`);
-            console.log(`   🔘 Found ${{pageData.buttons.length}} buttons`);
+            console.log(`   Page: "${{pageData.title}}" (Status: ${{statusCode}})`);
+            console.log(`   Found ${{pageData.links.length}} internal links`);
+            console.log(`   Found ${{pageData.buttons.length}} buttons`);
             
             // Check for basic issues - prioritize HTTP errors
             if (isHttpError || pageData.isErrorPage) {{
@@ -297,7 +297,7 @@ try {{
                     severity: "high",
                     statusCode: statusCode
                 }});
-                console.log(`   🚨 ERROR PAGE DETECTED (HTTP ${{statusCode}})`);
+                console.log(`   ERROR PAGE DETECTED (HTTP ${{statusCode}})`);
                 // Mark this URL as visited so it doesn't get crawled again from other sources
                 visitedUrls.add(normalizedCurrentUrl);
                 return pageData;
@@ -312,9 +312,9 @@ try {{
                         issue: "Page appears to be blank or has very little content",
                         severity: "medium"
                     }});
-                    console.log(`   ⚠️ LOW CONTENT WARNING`);
+                    console.log(`   LOW CONTENT WARNING`);
                 }} else {{
-                    console.log(`   ⚠️ Page is blank (already reported as link destination)`);
+                    console.log(`   Page is blank (already reported as link destination)`);
                 }}
                 // Mark this URL as visited so it doesn't get crawled again from other sources
                 visitedUrls.add(normalizedCurrentUrl);
@@ -337,7 +337,7 @@ try {{
                 
                 // Skip if we've already tested this destination URL
                 if (testedLinks.has(linkTestId)) {{
-                    console.log(`   [${{i+1}}/${{pageData.links.length}}] Skipping "${{link.text}}" → ${{normalizedDest.replace(targetUrl, '')}} (already tested)`);
+                    console.log(`   [${{i+1}}/${{pageData.links.length}}] Skipping "${{link.text}}" -> ${{normalizedDest.replace(targetUrl, '')}} (already tested)`);
                     continue;
                 }}
                 
@@ -366,7 +366,7 @@ try {{
                     // Normalize result URL the same way
                     const normalizedResultUrl = normalizeUrl(result.url);
                     
-                    console.log(`      → ${{normalizedResultUrl.replace(targetUrl, '')}} (Status: ${{linkStatusCode}})`);
+                    console.log(`      -> ${{normalizedResultUrl.replace(targetUrl, '')}} (Status: ${{linkStatusCode}})`);
                     
                     if (isLinkHttpError || result.isError) {{
                         bugs.push({{
@@ -378,14 +378,14 @@ try {{
                             severity: "high",
                             statusCode: linkStatusCode
                         }});
-                        console.log(`      🚨 BROKEN LINK (HTTP ${{linkStatusCode}})`);
+                        console.log(`      BROKEN LINK (HTTP ${{linkStatusCode}})`);
                         // Mark as problematic so it won't be crawled separately
                         problematicUrls.add(normalizedResultUrl);
                         // Remove from queue if it's there
                         const queueIndex = urlQueue.indexOf(normalizedResultUrl);
                         if (queueIndex > -1) {{
                             urlQueue.splice(queueIndex, 1);
-                            console.log(`      🗑️ Removed from crawl queue: ${{normalizedResultUrl.replace(targetUrl, '')}}`);
+                            console.log(`      Removed from crawl queue: ${{normalizedResultUrl.replace(targetUrl, '')}}`);
                         }}
                     }} else if (!result.hasContent) {{
                         bugs.push({{
@@ -396,191 +396,74 @@ try {{
                             issue: `Link "${{link.text}}" leads to blank page`,
                             severity: "medium"
                         }});
-                        console.log(`      ⚠️ BLANK DESTINATION`);
-                        // Mark as problematic so it won't be crawled separately
-                        problematicUrls.add(normalizedResultUrl);
-                        // Track that we've reported this URL as blank
+                        console.log(`      BLANK DESTINATION`);
                         reportedBlankPages.add(normalizedResultUrl);
                         // Remove from queue if it's there
                         const queueIndex = urlQueue.indexOf(normalizedResultUrl);
                         if (queueIndex > -1) {{
                             urlQueue.splice(queueIndex, 1);
-                            console.log(`      🗑️ Removed from crawl queue: ${{normalizedResultUrl.replace(targetUrl, '')}}`);
+                            console.log(`      Removed from crawl queue: ${{normalizedResultUrl.replace(targetUrl, '')}}`);
                         }}
                     }} else {{
-                        console.log(`      ✅ Working`);
-                        
-                        // Only add working pages to queue if new
-                        if (!visitedUrls.has(normalizedResultUrl) && !urlQueue.includes(normalizedResultUrl) && !problematicUrls.has(normalizedResultUrl)) {{
+                        // Add to queue for crawling if not already there and not problematic
+                        if (!urlQueue.includes(normalizedResultUrl) && !problematicUrls.has(normalizedResultUrl)) {{
                             urlQueue.push(normalizedResultUrl);
-                            console.log(`      🔗 Queued for crawling: ${{normalizedResultUrl.replace(targetUrl, '')}}`);
-                        }} else if (visitedUrls.has(normalizedResultUrl)) {{
-                            console.log(`      ⏭️ Already visited: ${{normalizedResultUrl.replace(targetUrl, '')}}`);
-                        }} else if (problematicUrls.has(normalizedResultUrl)) {{
-                            console.log(`      ⏭️ Skipping queue (problematic): ${{normalizedResultUrl.replace(targetUrl, '')}}`);
-                        }} else {{
-                            console.log(`      ⏭️ Already in queue: ${{normalizedResultUrl.replace(targetUrl, '')}}`);
+                            console.log(`      Added to crawl queue: ${{normalizedResultUrl.replace(targetUrl, '')}}`);
                         }}
                     }}
-                    
-                }} catch (error) {{
+                }} catch (linkError) {{
+                    console.log(`      ERROR testing link: ${{linkError.message}}`);
                     bugs.push({{
                         type: "NAVIGATION_ERROR",
                         page: normalizedCurrentUrl,
                         link: link.text,
-                        issue: `Failed to navigate to "${{link.text}}": ${{error.message.substring(0, 100)}}`,
+                        destination: link.href,
+                        issue: `Failed to navigate to link: ${{linkError.message}}`,
                         severity: "medium"
                     }});
-                    console.log(`      ❌ Navigation failed: ${{error.message.substring(0, 50)}}`);
-                }}
-            }}
-            
-            // Test buttons too
-            for (let i = 0; i < Math.min(5, pageData.buttons.length); i++) {{
-                const button = pageData.buttons[i];
-                console.log(`   🔘 [${{i+1}}/${{Math.min(5, pageData.buttons.length)}}] Testing button: "${{button.text}}"`);
-                
-                try {{
-                    // Go back to current page first
-                    await page.goto(normalizedCurrentUrl, {{ waitUntil: 'domcontentloaded' }});
-                    await page.waitForTimeout(300);
-                    
-                    // Try to click the button
-                    await page.click(`text="${{button.text}}"`);
-                    await page.waitForTimeout(600);
-                    
-                    const result = await page.evaluate(() => ({{
-                        title: document.title,
-                        url: window.location.href,
-                        isError: document.title.toLowerCase().includes('404') || 
-                                document.body.textContent.toLowerCase().includes('404 not found'),
-                        hasContent: document.body.textContent.length > 100
-                    }}));
-                    
-                    console.log(`      → ${{result.url.replace(targetUrl, '')}}`);
-                    
-                    if (result.isError) {{
-                        bugs.push({{
-                            type: "BUTTON_ERROR",
-                            page: normalizedCurrentUrl,
-                            button: button.text,
-                            destination: result.url,
-                            issue: `Button "${{button.text}}" leads to error page`,
-                            severity: "high"
-                        }});
-                        console.log(`      🚨 BUTTON ERROR`);
-                    }} else if (!result.hasContent) {{
-                        bugs.push({{
-                            type: "BUTTON_BLANK",
-                            page: normalizedCurrentUrl,
-                            button: button.text,
-                            destination: result.url,
-                            issue: `Button "${{button.text}}" leads to blank page`,
-                            severity: "medium"
-                        }});
-                        console.log(`      ⚠️ BUTTON BLANK`);
-                    }} else {{
-                        console.log(`      ✅ Button working`);
-                    }}
-                    
-                }} catch (error) {{
-                    console.log(`      ⚠️ Button click failed: ${{error.message.substring(0, 50)}}`);
                 }}
             }}
             
             return pageData;
-            
-        }} catch (error) {{
-            console.log(`   💥 Failed to test page: ${{error.message}}`);
+        }} catch (pageError) {{
+            console.log(`   ERROR crawling page: ${{pageError.message}}`);
             bugs.push({{
-                type: "PAGE_LOAD_ERROR",
+                type: "NAVIGATION_ERROR",
                 page: normalizedCurrentUrl,
-                issue: `Failed to load page: ${{error.message}}`,
+                issue: `Failed to load page: ${{pageError.message}}`,
                 severity: "high"
             }});
             return null;
         }}
     }}
-    
-    // MAIN CRAWLING LOOP - process ALL pages in queue
+
+    // Main crawling loop
     while (urlQueue.length > 0 && pageCount < maxPages) {{
-        const nextUrl = urlQueue.shift();
-        const normalizedNextUrl = normalizeUrl(nextUrl);
-        
-        // Skip if we've already tested this URL as a link and found it problematic
-        if (testedLinks.has(normalizedNextUrl) || problematicUrls.has(normalizedNextUrl)) {{
-            console.log(`\\n⏭️ Skipping ${{normalizedNextUrl.replace(targetUrl, '')}} (already tested or problematic)`);
-            continue;
-        }}
-        
-        console.log(`\\n📋 Queue status: ${{urlQueue.length}} URLs remaining`);
-        await crawlPage(nextUrl);
+        const currentUrl = urlQueue.shift();
+        await crawlPage(currentUrl);
     }}
-    
-    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    
-    console.log(`\\n🎯 CRAWL COMPLETE`);
-    console.log(`=================`);
-    console.log(`⏱️ Duration: ${{duration}}s`);
-    console.log(`📄 Pages tested: ${{visitedUrls.size}}`);
-    console.log(`🐛 Issues found: ${{bugs.length}}`);
-    
-    if (bugs.length > 0) {{
-        console.log(`\\n🚨 ISSUES FOUND:`);
-        bugs.forEach((bug, i) => {{
-            console.log(`   ${{i + 1}}. ${{bug.issue}}`);
-            if (bug.link) console.log(`      Link: "${{bug.link}}"`);
-            if (bug.button) console.log(`      Button: "${{bug.button}}"`);
-            if (bug.destination) console.log(`      URL: ${{bug.destination.replace(targetUrl, '')}}`);
-        }});
-    }} else {{
-        console.log(`\\n✅ NO ISSUES FOUND!`);
-        console.log(`All tested pages appear to be working correctly.`);
-    }}
-    
-    console.log(`\\n🗺️ TESTED PAGES:`);
-    Array.from(visitedUrls).forEach((pageUrl, i) => {{
-        console.log(`   ${{i + 1}}. ${{pageUrl.replace(targetUrl, '') || '/'}}`);
-    }});
-    
-    if (urlQueue.length > 0) {{
-        console.log(`\\n🔄 REMAINING URLS (${{urlQueue.length}}):`);
-        urlQueue.slice(0, 5).forEach((queueUrl, i) => {{
-            console.log(`   ${{i + 1}}. ${{queueUrl.replace(targetUrl, '')}}`);
-        }});
-        if (urlQueue.length > 5) {{
-            console.log(`   ... and ${{urlQueue.length - 5}} more`);
-        }}
-    }}
-    
-    // Return results as JSON
-    const results = {{
+
+    const endTime = Date.now();
+    const duration = Math.round((endTime - startTime) / 1000);
+
+    console.log("\\nCRAWLER_RESULT_START");
+    console.log(JSON.stringify({{
         success: true,
-        url: targetUrl,
-        duration: duration,
-        pagesVisited: Array.from(visitedUrls).length,
-        issuesFound: bugs.length,
         bugs: bugs,
-        crawledUrls: Array.from(visitedUrls),
-        remainingUrls: urlQueue,
-        logs: "See console output for detailed progress"
-    }};
-    
-    console.log(`\\n📊 FINAL RESULTS:`);
-    console.log(JSON.stringify(results, null, 2));
-    
-    // Output final result with special marker for parsing
-    console.log("CRAWLER_RESULT_START");
-    console.log(JSON.stringify(results));
+        pagesVisited: pageCount,
+        duration: duration,
+        url: targetUrl
+    }}));
     console.log("CRAWLER_RESULT_END");
-    
+
 }} catch (error) {{
-    console.log(`💀 CRAWLER FAILED: ${{error.message}}`);
+    console.log("CRAWLER_RESULT_START");
     console.log(JSON.stringify({{
         success: false,
         error: error.message,
         url: targetUrl
     }}));
+    console.log("CRAWLER_RESULT_END");
 }} finally {{
     await stagehand.close();
 }}
@@ -588,7 +471,7 @@ try {{
         
         # Write the script to a temporary file
         script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_crawler.mjs")
-        with open(script_path, "w") as f:
+        with open(script_path, "w", encoding='utf-8') as f:
             f.write(crawler_script)
         
         # Run the Node.js script from the backend directory
@@ -597,6 +480,8 @@ try {{
             ["node", "temp_crawler.mjs"],
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',  # Replace problematic characters instead of failing
             timeout=60,  # 60 second timeout
             cwd=backend_dir
         )

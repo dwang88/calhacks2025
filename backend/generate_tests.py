@@ -119,7 +119,7 @@ async def save_test_file(test_code: str, url: str):
     # Create a safe filename
     filename = f"test_{url.replace('https://', '').replace('http://', '').replace('/', '_').replace('.', '_').replace(':', '_')}.py"
     
-    with open(filename, 'w') as f:
+    with open(filename, 'w', encoding='utf-8') as f:
         f.write(test_code)
     
     print(f"💾 Test saved to: {filename}")
@@ -147,7 +147,7 @@ async def generate_playwright_config(func_name: str):
 
         config_code = response.content[0].text
         print("✅ Config generation complete!")
-        with open("playwright.config.py", "w") as f:
+        with open("playwright.config.py", "w", encoding='utf-8') as f:
             f.write(config_code)
         return config_code
         
