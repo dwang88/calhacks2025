@@ -1,2 +1,3 @@
 .calhacks/
 .env
+__pycache__/
