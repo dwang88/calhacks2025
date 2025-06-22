@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """
 FastAPI Server for Website Testing Chatbot Interface
-Provides REST API endpoints for the frontend chatbot to interact with the FastMCP server.
+Integrates Stagehand crawler functionality with REST API endpoints.
 """
 
 import os
 import asyncio
+import subprocess
+import json
 from typing import Dict, Any, List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 from dotenv import load_dotenv
-from langchain_mcp_adapters.client import MultiServerMCPClient
-from langgraph.prebuilt import create_react_agent
-from langchain_core.messages.ai import AIMessage
 
 # Load environment variables
 load_dotenv()
@@ -24,9 +23,9 @@ app = FastAPI(title="Website Testing API", version="1.0.0")
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:3000", "http://localhost:3000", "http://127.0.0.1:8000", "http://localhost:8000"],
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -43,130 +42,592 @@ class ChatResponse(BaseModel):
     success: bool
     data: Dict[str, Any] = None
 
-# Initialize MCP client
-mcp_client = None
-agent = None
-
-async def initialize_mcp_client():
-    """Initialize the MCP client and agent."""
-    global mcp_client, agent
-    
-    mcp_client = MultiServerMCPClient(
-        {
-            "website-testing-tools": {
-                "url": "http://localhost:8001/mcp",
-                "transport": "streamable_http",
-            }
-        }
-    )
-    
-    tools = await mcp_client.get_tools()
-    agent = create_react_agent(
-        "anthropic:claude-3-5-sonnet-20241022",
-        tools
-    )
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize MCP client on startup."""
-    await initialize_mcp_client()
+# Explicit OPTIONS handler
+@app.options("/chat")
+async def options_chat():
+    """Handle OPTIONS requests for CORS preflight."""
+    return {"message": "OK"}
 
 @app.get("/")
 async def root():
     """Health check endpoint."""
     return {"message": "Website Testing API is running"}
 
+async def run_stagehand_crawler(url: str) -> Dict[str, Any]:
+    """Run the integrated Stagehand crawler on a URL."""
+    try:
+        # Create a Node.js script that uses Stagehand
+        crawler_script = f"""
+import {{ Stagehand }} from "@browserbasehq/stagehand";
+import {{ z }} from "zod";
+
+const targetUrl = "{url}";
+
+console.log("🕷️ INTEGRATED STAGEHAND CRAWLER");
+console.log("🔍 With Detailed Progress Logging");
+console.log("================================");
+
+// Initialize Stagehand
+const stagehand = new Stagehand({{
+    env: "LOCAL",
+    verbose: 0,
+}});
+
+await stagehand.init();
+const page = stagehand.page;
+
+try {{
+    const startTime = Date.now();
+    let visitedUrls = new Set();
+    let testedLinks = new Set(); // Track tested link combinations: "page->destination"
+    let problematicUrls = new Set(); // Track URLs that are broken/blank and should never be crawled
+    let reportedBlankPages = new Set(); // Track URLs we've already reported as blank destinations
+    let urlQueue = [targetUrl.endsWith('/') ? targetUrl.slice(0, -1) : targetUrl]; // Normalize initial URL
+    let bugs = [];
+    let pageCount = 0;
+    const maxPages = 10; // Increased limit
+
+    console.log(`🚀 Starting crawl from: ${{targetUrl}}`);
+    console.log(`📊 Max pages limit: ${{maxPages}}`);
+
+    // Helper function to normalize URLs consistently
+    function normalizeUrl(url) {{
+        try {{
+            const urlObj = new URL(url);
+            return urlObj.origin + urlObj.pathname.replace(/\\/+$/, '');
+        }} catch (e) {{
+            return url.endsWith('/') ? url.slice(0, -1) : url;
+        }}
+    }}
+
+    // Enhanced crawling function with detailed logging
+    async function crawlPage(currentUrl) {{
+        const normalizedCurrentUrl = normalizeUrl(currentUrl);
+        
+        if (visitedUrls.has(normalizedCurrentUrl) || pageCount >= maxPages) {{
+            return;
+        }}
+        
+        visitedUrls.add(normalizedCurrentUrl);
+        pageCount++;
+        
+        console.log(`\\n[${{pageCount}}] 🔍 Testing: ${{normalizedCurrentUrl.replace(targetUrl, '') || '/'}}`);
+        
+        try {{
+            const response = await page.goto(normalizedCurrentUrl, {{ waitUntil: 'domcontentloaded' }});
+            await page.waitForTimeout(1000);
+            
+            const pageData = await page.evaluate(() => {{
+                const links = Array.from(document.querySelectorAll('a[href]')).map(a => ({{
+                    text: a.textContent.trim(),
+                    href: a.href,
+                    isInternal: a.href.startsWith(window.location.origin)
+                }}));
+                
+                const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]')).map(btn => ({{
+                    text: btn.textContent.trim() || btn.value || btn.getAttribute('aria-label') || 'Button',
+                    type: btn.type || 'button'
+                }}));
+                
+                return {{
+                    title: document.title,
+                    url: window.location.href,
+                    html: document.documentElement.outerHTML,
+                    links: links.filter(l => l.text && l.isInternal).slice(0, 30),
+                    buttons: buttons.slice(0, 8),
+                    hasContent: document.body.textContent.length > 100,
+                    isErrorPage: document.title.toLowerCase().includes('404') || 
+                               document.body.textContent.toLowerCase().includes('404 not found') ||
+                               document.title.toLowerCase().includes('error') ||
+                               document.body.textContent.toLowerCase().includes('page not found') ||
+                               document.body.textContent.toLowerCase().includes('not found')
+                }};
+            }});
+            
+            // Check HTTP status code for errors
+            const statusCode = response.status();
+            const isHttpError = statusCode >= 400;
+            
+            console.log(`   📄 "${{pageData.title}}" (Status: ${{statusCode}})`);
+            console.log(`   🔗 Found ${{pageData.links.length}} internal links`);
+            console.log(`   🔘 Found ${{pageData.buttons.length}} buttons`);
+            
+            // Check for basic issues - prioritize HTTP errors
+            if (isHttpError || pageData.isErrorPage) {{
+                bugs.push({{
+                    type: "ERROR_PAGE",
+                    page: normalizedCurrentUrl,
+                    issue: `Error page detected: ${{pageData.title}} (HTTP ${{statusCode}})`,
+                    severity: "high",
+                    statusCode: statusCode
+                }});
+                console.log(`   🚨 ERROR PAGE DETECTED (HTTP ${{statusCode}})`);
+                // Mark this URL as visited so it doesn't get crawled again from other sources
+                visitedUrls.add(normalizedCurrentUrl);
+                return pageData;
+            }}
+            
+            if (!pageData.hasContent) {{
+                // Only report blank page if we haven't already reported it as a blank destination
+                if (!reportedBlankPages.has(normalizedCurrentUrl)) {{
+                    bugs.push({{
+                        type: "BLANK_PAGE", 
+                        page: normalizedCurrentUrl,
+                        issue: "Page appears to be blank or has very little content",
+                        severity: "medium"
+                    }});
+                    console.log(`   ⚠️ LOW CONTENT WARNING`);
+                }} else {{
+                    console.log(`   ⚠️ Page is blank (already reported as link destination)`);
+                }}
+                // Mark this URL as visited so it doesn't get crawled again from other sources
+                visitedUrls.add(normalizedCurrentUrl);
+                return pageData; // Don't process links from blank pages
+            }}
+            
+            // Test ALL links - but skip duplicates efficiently
+            for (let i = 0; i < pageData.links.length; i++) {{
+                const link = pageData.links[i];
+                const normalizedDest = normalizeUrl(link.href);
+                
+                // Skip if it's the same page we're already on
+                if (normalizedDest === normalizedCurrentUrl) {{
+                    console.log(`   [${{i+1}}/${{pageData.links.length}}] Skipping "${{link.text}}" (same page)`);
+                    continue;
+                }}
+                
+                // Create unique identifier for this link test
+                const linkTestId = `${{normalizedDest}}`;
+                
+                // Skip if we've already tested this destination URL
+                if (testedLinks.has(linkTestId)) {{
+                    console.log(`   [${{i+1}}/${{pageData.links.length}}] Skipping "${{link.text}}" → ${{normalizedDest.replace(targetUrl, '')}} (already tested)`);
+                    continue;
+                }}
+                
+                console.log(`   [${{i+1}}/${{pageData.links.length}}] Testing link: "${{link.text}}"`);
+                testedLinks.add(linkTestId); // Mark as tested
+                
+                try {{
+                    const linkResponse = await page.goto(link.href, {{ waitUntil: 'domcontentloaded' }});
+                    await page.waitForTimeout(500);
+                    
+                    const result = await page.evaluate(() => ({{
+                        title: document.title,
+                        url: window.location.href,
+                        isError: document.title.toLowerCase().includes('404') || 
+                                document.body.textContent.toLowerCase().includes('404 not found') ||
+                                document.title.toLowerCase().includes('error') ||
+                                document.body.textContent.toLowerCase().includes('page not found') ||
+                                document.body.textContent.toLowerCase().includes('not found'),
+                        hasContent: document.body.textContent.length > 100
+                    }}));
+                    
+                    // Check HTTP status for the link destination
+                    const linkStatusCode = linkResponse.status();
+                    const isLinkHttpError = linkStatusCode >= 400;
+                    
+                    // Normalize result URL the same way
+                    const normalizedResultUrl = normalizeUrl(result.url);
+                    
+                    console.log(`      → ${{normalizedResultUrl.replace(targetUrl, '')}} (Status: ${{linkStatusCode}})`);
+                    
+                    if (isLinkHttpError || result.isError) {{
+                        bugs.push({{
+                            type: "BROKEN_LINK",
+                            page: normalizedCurrentUrl,
+                            link: link.text,
+                            destination: normalizedResultUrl,
+                            issue: `Link "${{link.text}}" leads to error page (HTTP ${{linkStatusCode}})`,
+                            severity: "high",
+                            statusCode: linkStatusCode
+                        }});
+                        console.log(`      🚨 BROKEN LINK (HTTP ${{linkStatusCode}})`);
+                        // Mark as problematic so it won't be crawled separately
+                        problematicUrls.add(normalizedResultUrl);
+                        // Remove from queue if it's there
+                        const queueIndex = urlQueue.indexOf(normalizedResultUrl);
+                        if (queueIndex > -1) {{
+                            urlQueue.splice(queueIndex, 1);
+                            console.log(`      🗑️ Removed from crawl queue: ${{normalizedResultUrl.replace(targetUrl, '')}}`);
+                        }}
+                    }} else if (!result.hasContent) {{
+                        bugs.push({{
+                            type: "BLANK_DESTINATION",
+                            page: normalizedCurrentUrl,
+                            link: link.text,
+                            destination: normalizedResultUrl,
+                            issue: `Link "${{link.text}}" leads to blank page`,
+                            severity: "medium"
+                        }});
+                        console.log(`      ⚠️ BLANK DESTINATION`);
+                        // Mark as problematic so it won't be crawled separately
+                        problematicUrls.add(normalizedResultUrl);
+                        // Track that we've reported this URL as blank
+                        reportedBlankPages.add(normalizedResultUrl);
+                        // Remove from queue if it's there
+                        const queueIndex = urlQueue.indexOf(normalizedResultUrl);
+                        if (queueIndex > -1) {{
+                            urlQueue.splice(queueIndex, 1);
+                            console.log(`      🗑️ Removed from crawl queue: ${{normalizedResultUrl.replace(targetUrl, '')}}`);
+                        }}
+                    }} else {{
+                        console.log(`      ✅ Working`);
+                        
+                        // Only add working pages to queue if new
+                        if (!visitedUrls.has(normalizedResultUrl) && !urlQueue.includes(normalizedResultUrl) && !problematicUrls.has(normalizedResultUrl)) {{
+                            urlQueue.push(normalizedResultUrl);
+                            console.log(`      🔗 Queued for crawling: ${{normalizedResultUrl.replace(targetUrl, '')}}`);
+                        }} else if (visitedUrls.has(normalizedResultUrl)) {{
+                            console.log(`      ⏭️ Already visited: ${{normalizedResultUrl.replace(targetUrl, '')}}`);
+                        }} else if (problematicUrls.has(normalizedResultUrl)) {{
+                            console.log(`      ⏭️ Skipping queue (problematic): ${{normalizedResultUrl.replace(targetUrl, '')}}`);
+                        }} else {{
+                            console.log(`      ⏭️ Already in queue: ${{normalizedResultUrl.replace(targetUrl, '')}}`);
+                        }}
+                    }}
+                    
+                }} catch (error) {{
+                    bugs.push({{
+                        type: "NAVIGATION_ERROR",
+                        page: normalizedCurrentUrl,
+                        link: link.text,
+                        issue: `Failed to navigate to "${{link.text}}": ${{error.message.substring(0, 100)}}`,
+                        severity: "medium"
+                    }});
+                    console.log(`      ❌ Navigation failed: ${{error.message.substring(0, 50)}}`);
+                }}
+            }}
+            
+            // Test buttons too
+            for (let i = 0; i < Math.min(5, pageData.buttons.length); i++) {{
+                const button = pageData.buttons[i];
+                console.log(`   🔘 [${{i+1}}/${{Math.min(5, pageData.buttons.length)}}] Testing button: "${{button.text}}"`);
+                
+                try {{
+                    // Go back to current page first
+                    await page.goto(normalizedCurrentUrl, {{ waitUntil: 'domcontentloaded' }});
+                    await page.waitForTimeout(300);
+                    
+                    // Try to click the button
+                    await page.click(`text="${{button.text}}"`);
+                    await page.waitForTimeout(600);
+                    
+                    const result = await page.evaluate(() => ({{
+                        title: document.title,
+                        url: window.location.href,
+                        isError: document.title.toLowerCase().includes('404') || 
+                                document.body.textContent.toLowerCase().includes('404 not found'),
+                        hasContent: document.body.textContent.length > 100
+                    }}));
+                    
+                    console.log(`      → ${{result.url.replace(targetUrl, '')}}`);
+                    
+                    if (result.isError) {{
+                        bugs.push({{
+                            type: "BUTTON_ERROR",
+                            page: normalizedCurrentUrl,
+                            button: button.text,
+                            destination: result.url,
+                            issue: `Button "${{button.text}}" leads to error page`,
+                            severity: "high"
+                        }});
+                        console.log(`      🚨 BUTTON ERROR`);
+                    }} else if (!result.hasContent) {{
+                        bugs.push({{
+                            type: "BUTTON_BLANK",
+                            page: normalizedCurrentUrl,
+                            button: button.text,
+                            destination: result.url,
+                            issue: `Button "${{button.text}}" leads to blank page`,
+                            severity: "medium"
+                        }});
+                        console.log(`      ⚠️ BUTTON BLANK`);
+                    }} else {{
+                        console.log(`      ✅ Button working`);
+                    }}
+                    
+                }} catch (error) {{
+                    console.log(`      ⚠️ Button click failed: ${{error.message.substring(0, 50)}}`);
+                }}
+            }}
+            
+            return pageData;
+            
+        }} catch (error) {{
+            console.log(`   💥 Failed to test page: ${{error.message}}`);
+            bugs.push({{
+                type: "PAGE_LOAD_ERROR",
+                page: normalizedCurrentUrl,
+                issue: `Failed to load page: ${{error.message}}`,
+                severity: "high"
+            }});
+            return null;
+        }}
+    }}
+    
+    // MAIN CRAWLING LOOP - process ALL pages in queue
+    while (urlQueue.length > 0 && pageCount < maxPages) {{
+        const nextUrl = urlQueue.shift();
+        const normalizedNextUrl = normalizeUrl(nextUrl);
+        
+        // Skip if we've already tested this URL as a link and found it problematic
+        if (testedLinks.has(normalizedNextUrl) || problematicUrls.has(normalizedNextUrl)) {{
+            console.log(`\\n⏭️ Skipping ${{normalizedNextUrl.replace(targetUrl, '')}} (already tested or problematic)`);
+            continue;
+        }}
+        
+        console.log(`\\n📋 Queue status: ${{urlQueue.length}} URLs remaining`);
+        await crawlPage(nextUrl);
+    }}
+    
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    
+    console.log(`\\n🎯 CRAWL COMPLETE`);
+    console.log(`=================`);
+    console.log(`⏱️ Duration: ${{duration}}s`);
+    console.log(`📄 Pages tested: ${{visitedUrls.size}}`);
+    console.log(`🐛 Issues found: ${{bugs.length}}`);
+    
+    if (bugs.length > 0) {{
+        console.log(`\\n🚨 ISSUES FOUND:`);
+        bugs.forEach((bug, i) => {{
+            console.log(`   ${{i + 1}}. ${{bug.issue}}`);
+            if (bug.link) console.log(`      Link: "${{bug.link}}"`);
+            if (bug.button) console.log(`      Button: "${{bug.button}}"`);
+            if (bug.destination) console.log(`      URL: ${{bug.destination.replace(targetUrl, '')}}`);
+        }});
+    }} else {{
+        console.log(`\\n✅ NO ISSUES FOUND!`);
+        console.log(`All tested pages appear to be working correctly.`);
+    }}
+    
+    console.log(`\\n🗺️ TESTED PAGES:`);
+    Array.from(visitedUrls).forEach((pageUrl, i) => {{
+        console.log(`   ${{i + 1}}. ${{pageUrl.replace(targetUrl, '') || '/'}}`);
+    }});
+    
+    if (urlQueue.length > 0) {{
+        console.log(`\\n🔄 REMAINING URLS (${{urlQueue.length}}):`);
+        urlQueue.slice(0, 5).forEach((queueUrl, i) => {{
+            console.log(`   ${{i + 1}}. ${{queueUrl.replace(targetUrl, '')}}`);
+        }});
+        if (urlQueue.length > 5) {{
+            console.log(`   ... and ${{urlQueue.length - 5}} more`);
+        }}
+    }}
+    
+    // Return results as JSON
+    const results = {{
+        success: true,
+        url: targetUrl,
+        duration: duration,
+        pagesVisited: Array.from(visitedUrls).length,
+        issuesFound: bugs.length,
+        bugs: bugs,
+        crawledUrls: Array.from(visitedUrls),
+        remainingUrls: urlQueue,
+        logs: "See console output for detailed progress"
+    }};
+    
+    console.log(`\\n📊 FINAL RESULTS:`);
+    console.log(JSON.stringify(results, null, 2));
+    
+    // Output final result with special marker for parsing
+    console.log("CRAWLER_RESULT_START");
+    console.log(JSON.stringify(results));
+    console.log("CRAWLER_RESULT_END");
+    
+}} catch (error) {{
+    console.log(`💀 CRAWLER FAILED: ${{error.message}}`);
+    console.log(JSON.stringify({{
+        success: false,
+        error: error.message,
+        url: targetUrl
+    }}));
+}} finally {{
+    await stagehand.close();
+}}
+"""
+        
+        # Write the script to a temporary file
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_crawler.mjs")
+        with open(script_path, "w") as f:
+            f.write(crawler_script)
+        
+        # Run the Node.js script from the backend directory
+        backend_dir = os.path.dirname(os.path.abspath(__file__))
+        result = subprocess.run(
+            ["node", "temp_crawler.mjs"],
+            capture_output=True,
+            text=True,
+            timeout=60,  # 60 second timeout
+            cwd=backend_dir
+        )
+        
+        if result.returncode == 0:
+            try:
+                # Clean up
+                if os.path.exists(script_path):
+                    os.remove(script_path)
+                
+                # Extract JSON result from console output
+                output = result.stdout
+                start_marker = "CRAWLER_RESULT_START"
+                end_marker = "CRAWLER_RESULT_END"
+                
+                if start_marker in output and end_marker in output:
+                    start_idx = output.find(start_marker) + len(start_marker)
+                    end_idx = output.find(end_marker)
+                    json_str = output[start_idx:end_idx].strip()
+                    return json.loads(json_str)
+                else:
+                    # Fallback to old method
+                    return json.loads(output.strip())
+                    
+            except json.JSONDecodeError:
+                # Clean up on error too
+                if os.path.exists(script_path):
+                    os.remove(script_path)
+                return {
+                    "success": False,
+                    "error": "Failed to parse crawler output",
+                    "raw_output": result.stdout
+                }
+        else:
+            # Clean up on error
+            if os.path.exists(script_path):
+                os.remove(script_path)
+            return {
+                "success": False,
+                "error": f"Crawler failed with exit code {result.returncode}",
+                "stderr": result.stderr,
+                "stdout": result.stdout
+            }
+            
+    except subprocess.TimeoutExpired:
+        # Clean up on timeout
+        if os.path.exists(script_path):
+            os.remove(script_path)
+        return {
+            "success": False,
+            "error": "Crawler timed out after 60 seconds"
+        }
+    except Exception as e:
+        # Clean up on exception
+        try:
+            script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_crawler.mjs")
+            if os.path.exists(script_path):
+                os.remove(script_path)
+        except:
+            pass
+        return {
+            "success": False,
+            "error": f"Failed to run crawler: {str(e)}"
+        }
+
+@app.post("/scrape")
+async def scrape_website(request: dict):
+    """Scrape a website using Stagehand crawler."""
+    url = request.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+    
+    result = await run_stagehand_crawler(url)
+    return result
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Handle chat messages from the frontend user using MCP tools."""
+    """Handle chat messages and perform website testing."""
     try:
-        if not agent:
+        user_message = request.messages[-1].content.lower()
+        
+        # Extract URL from message if present
+        target_url = request.url
+        if not target_url:
+            # Try to extract URL from message
+            words = request.messages[-1].content.split()
+            for word in words:
+                if word.startswith(('http://', 'https://', 'localhost')):
+                    target_url = word if word.startswith(('http://', 'https://')) else f"http://{word}"
+                    break
+        
+        if not target_url:
             return ChatResponse(
-                success=False,
-                message="❌ MCP agent not initialized. Please try again."
+                success=True,
+                message="🤖 Hi! I can help you test websites. Please provide a URL to test, like 'test localhost:3001' or 'scrape https://example.com'",
+                data={"action": "help"}
             )
         
-        # Prepare the user message
-        user_message = request.messages[-1].content
-        
-        # If URL is provided, include it in the context
-        if request.url:
-            user_message += f"\n\nURL to work with: {request.url}"
-        
-        # Create the message for the agent
-        messages = [{"role": "user", "content": user_message}]
-        
-        # Invoke the agent
-        response = await agent.ainvoke({"messages": messages})
-
-        print("Response: ", response)
-        print("Response type: ", type(response))
-        if isinstance(response, dict) and "messages" in response:
-            print("Number of messages: ", len(response["messages"]))
-            for i, msg in enumerate(response["messages"]):
-                print(f"Message {i}: type={type(msg)}, has_content={hasattr(msg, 'content')}, has_name={hasattr(msg, 'name')}")
-                if hasattr(msg, 'content'):
-                    print(f"  Content type: {type(msg.content)}")
-                    if isinstance(msg.content, list):
-                        print(f"  Content blocks: {len(msg.content)}")
-                        for j, block in enumerate(msg.content):
-                            print(f"    Block {j}: {block}")
-        
-        # Extract the response - LangGraph returns a dict with 'messages' key
-        if response and isinstance(response, dict) and "messages" in response:
-            # Get all messages and find the last AI message
-            messages = response["messages"]
+        # Determine action based on message content
+        if any(keyword in user_message for keyword in ['scrape', 'crawl', 'test', 'analyze']):
+            # Run the crawler
+            crawler_result = await run_stagehand_crawler(target_url)
             
-            # Look for the last AIMessage (assistant message)
-            for msg in reversed(messages):
-                # Check if it's an AI message (has content but no name attribute)
-                if hasattr(msg, 'content') and not hasattr(msg, 'name'):
-                    # Extract the text content from the AIMessage
-                    if isinstance(msg.content, str):
-                        message_content = msg.content
-                    elif isinstance(msg.content, list):
-                        # Handle list of content blocks (text and tool_use)
-                        text_blocks = [block for block in msg.content if block.get('type') == 'text']
-                        if text_blocks:
-                            message_content = text_blocks[-1].get('text', '')
-                        else:
-                            message_content = "Processing completed."
-                    else:
-                        message_content = str(msg.content)
+            if crawler_result.get("success"):
+                issues = crawler_result.get("bugs", [])
+                pages_visited = crawler_result.get("pagesVisited", 0)
+                duration = crawler_result.get("duration", "unknown")
+                
+                if issues:
+                    message = f"🔍 **Website Analysis Complete!**\\n\\n"
+                    message += f"📊 **Summary:**\\n"
+                    message += f"• Pages visited: {pages_visited}\\n"
+                    message += f"• Duration: {duration}s\\n"
+                    message += f"• Issues found: {len(issues)}\\n\\n"
                     
-                    return ChatResponse(
-                        success=True,
-                        message=message_content,
-                        data={
-                            "action": "mcp_tool_execution",
-                            "status": "completed",
-                            "url": request.url
-                        }
-                    )
-            
-            # If no AI message found, check if there are any messages with content
-            for msg in reversed(messages):
-                if hasattr(msg, 'content'):
-                    message_content = str(msg.content)
-                    return ChatResponse(
-                        success=True,
-                        message=message_content,
-                        data={
-                            "action": "mcp_tool_execution",
-                            "status": "completed",
-                            "url": request.url
-                        }
-                    )
-        
-        # Fallback response
-        return ChatResponse(
-            success=True,
-            message="I'm here to help with website testing! What would you like me to do?",
-            data={
-                "action": "help",
-                "status": "completed"
-            }
-        )
+                    # Categorize issues
+                    error_pages = [bug for bug in issues if bug['type'] == 'ERROR_PAGE']
+                    broken_links = [bug for bug in issues if bug['type'] == 'BROKEN_LINK']
+                    blank_pages = [bug for bug in issues if bug['type'] == 'BLANK_DESTINATION']
+                    nav_errors = [bug for bug in issues if bug['type'] == 'NAVIGATION_ERROR']
+                    
+                    if error_pages:
+                        message += f"🚨 **Error Pages ({len(error_pages)}):**\\n"
+                        for issue in error_pages[:3]:
+                            message += f"• {issue['issue']}\\n"
+                    
+                    if broken_links:
+                        message += f"\\n🔗 **Broken Links ({len(broken_links)}):**\\n"
+                        for issue in broken_links[:3]:
+                            message += f"• {issue['issue']}\\n"
+                    
+                    if blank_pages:
+                        message += f"\\n📄 **Blank Pages ({len(blank_pages)}):**\\n"
+                        for issue in blank_pages[:3]:
+                            message += f"• {issue['issue']}\\n"
+                    
+                    if nav_errors:
+                        message += f"\\n🧭 **Navigation Errors ({len(nav_errors)}):**\\n"
+                        for issue in nav_errors[:3]:
+                            message += f"• {issue['issue']}\\n"
+                    
+                    message += f"\\n📋 Full details available in the technical data below."
+                    
+                else:
+                    message = f"✅ **Great news!** No issues found on {target_url}\\n\\n"
+                    message += f"📊 **Summary:**\\n"
+                    message += f"• Pages visited: {pages_visited}\\n"
+                    message += f"• Duration: {duration}s\\n"
+                    message += f"• All tested links and pages are working correctly!"
+                
+                return ChatResponse(
+                    success=True,
+                    message=message,
+                    data=crawler_result
+                )
+            else:
+                return ChatResponse(
+                    success=False,
+                    message=f"❌ Failed to analyze {target_url}: {crawler_result.get('error', 'Unknown error')}",
+                    data=crawler_result
+                )
+        else:
+            return ChatResponse(
+                success=True,
+                message=f"🤖 I can help you test {target_url}! Try asking me to 'scrape {target_url}' or 'analyze {target_url}' to find issues.",
+                data={"action": "help", "url": target_url}
+            )
     
     except Exception as e:
         return ChatResponse(
@@ -181,82 +642,13 @@ async def list_tools():
         "tools": [
             {
                 "name": "scrape_website",
-                "description": "Scrape HTML, JavaScript, and CSS from a website",
+                "description": "Crawl and analyze a website for issues using Stagehand",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "url": {
                             "type": "string",
-                            "description": "The URL to scrape"
-                        }
-                    },
-                    "required": ["url"]
-                }
-            },
-            {
-                "name": "generate_playwright_test",
-                "description": "Generate Playwright tests for a website",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "url": {
-                            "type": "string",
-                            "description": "The URL to generate tests for"
-                        },
-                        "html_content": {
-                            "type": "string",
-                            "description": "The HTML content to analyze"
-                        }
-                    },
-                    "required": ["url", "html_content"]
-                }
-            },
-            {
-                "name": "run_playwright_test",
-                "description": "Run a Playwright test file",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "filename": {
-                            "type": "string",
-                            "description": "The test file to run"
-                        }
-                    },
-                    "required": ["filename"]
-                }
-            },
-            {
-                "name": "create_github_issue",
-                "description": "Create a GitHub issue for test failures",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "title": {
-                            "type": "string",
-                            "description": "Issue title"
-                        },
-                        "body": {
-                            "type": "string",
-                            "description": "Issue body"
-                        },
-                        "labels": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Issue labels"
-                        }
-                    },
-                    "required": ["title", "body"]
-                }
-            },
-            {
-                "name": "test_website_integrity",
-                "description": "Complete workflow: scrape, generate tests, run tests, create issue if needed",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "url": {
-                            "type": "string",
-                            "description": "The URL to test"
+                            "description": "The URL to analyze"
                         }
                     },
                     "required": ["url"]
